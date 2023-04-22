@@ -1,0 +1,245 @@
+---
+title: "Simple Linear Regression On Boston Housing"
+date: "2022/02/04"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+
+# Package invocation and data import
+```{r}
+library(mlbench) 
+library(ggplot2)
+library(GGally)
+library(car) 
+library(MASS) 
+library(lars)
+data("BostonHousing") 
+```
+
+# Introduction
+
+In this project, we use the data set of "BostonHousing," which is a Boston census tracts from the 1970 census composed by Harrison and Rubinfeld. There are 506 observations and 14 variables. Our goal is to find the best model that predict the median value of owner-occupied homes (medv).
+
+## Simple Linear Regression
+
+$y=\beta_0+\beta_1X+\epsilon\\$ Simple linear regression is performed to determine the association between two quantitative variables. It can be used to determine:$\\$ 1. The degree to which two variables are significantly correlated.$\\$ 2. The dependent variable's value at a certain level of the independent variable.
+
+## Variables
+
+crim per capita crime rate by town$\\$ zn proportion of residential land zoned for lots over $25,000$ sq.ft$\\$ indus proportion of non-retail business acres per town$\\$ chas Charles River dummy variable ($= 1$ if tract bounds river; $0$ otherwise)$\\$ nox nitric oxides concentration (parts per $10$ million)$\\$ rm average number of rooms per dwelling$\\$ age proportion of owner-occupied units built prior to $1940$$\\$ dis weighted distances to five Boston employment centres$\\$ rad index of accessibility to radial highways$\\$ tax full-value property-tax rate per USD $10,000$$\\$ ptratio pupil-teacher ratio by town$\\$ b $1000 ( B -0.63 )^2$ where $B$ is the proportion of blacks by town$\\$ lstat percentage of lower status of the population$\\$ medv median value of owner-occupied homes in USD $1000's$
+
+# Descriptive Statistics
+
+## Mean, Median, Extremum and Quartile
+```{r}
+data = BostonHousing[,-c(4)] # delete dummy variable “chas”, ignore the influence on housing prices of "Whether land limits the river"
+summary(data) 
+```
+
+## Plot Histograms
+```{r}
+x = data[,c(1:12)] 
+y = data[,c(13)] 
+
+title = c("CRIM","ZN","INDUS","NOX","RM","AGE","DIS",
+          "RAD","TAX","PRTATIO","B","LSTAT") 
+
+par(mfrow=c(1,1)) 
+par(mar = c(3,3,1,1)) 
+hist(y,main='Histogram of medv')
+
+par(mfrow=c(4,3)) 
+for(i in 1:12){
+  hist(x[,i], xlab = paste0(title[i]),main=paste('Histogram of',title[i]))
+} 
+```
+
+## Scatter Plots
+```{r}
+par(mfrow=c(4,3)) 
+par(mar = c(3,3,1,1)) 
+for(i in 1:12){
+  plot(x[,i], y, xlab = paste0(title[i]),ylab = "medv")
+} 
+```
+
+## Correlation Heat Map
+```{r}
+ggcorr(data, method = c("everything", "pearson")) 
+```
+
+# Multivariable linear regression
+```{r}
+data.1 = data.frame(scale(data)) 
+fit.1 = lm(medv~.-1,data.1) 
+summary(fit.1) 
+```
+Many coefficients of the variables are not significant, so variable selection is needed.
+
+# Variable Selection
+```{r}
+XX<-cor(data.1[,1:12])
+kappa(XX, exact=TRUE)
+
+```
+
+Condition number is smaller than but close to 100, so there is multicollinearity to some extent.
+
+## Ridge Regression
+
+Any data that exhibits multicollinearity can be analyzed using the model tuning technique known as ridge regression. This technique carries out $L2$ regularization. Predicted values differ much from real values when the problem of multicollinearity arises, least-squares are unbiased, and variances are significant.
+
+```{r}
+fit.ridge = lm.ridge(medv~.-1,data=data.1,lambda=seq(0,2,0.1)) 
+beta = coef(fit.ridge) 
+
+k = fit.ridge$lambda 
+plot(k,k,type='n',ylim=c(-0.5,0.7)) 
+linetype = c(1:12)
+char = c(11:22)
+for(i in 1:12){
+  lines(k,beta[,i],type='o',lty=linetype[i],pch=char[i],cex=0.75)
+} 
+legend('topright',legend=title,cex=0.6,lty=linetype,pch=char,ncol=3) 
+```
+
+As we can see from the graph, the lines are all constant. The data we generated show that each variable’s ridge coefficient is stable, so this is a bad model, and we can’t use ridge regression to select variables.
+
+## Stepwise regression
+
+Stepwise regression is the iterative process of building a regression model step by step while choosing independent variables to be included in the final model. After each cycle, the possible explanatory factors are successively added or removed, and the statistical significance is tested.
+Furthermore, there are three approaches to stepwise regression: forward selection, backward elimination, and bidirectional elimination. 
+
+```{r}
+fit.2 = step(fit.1,direction="both") 
+```
+
+In this project, we used bidirectional elimination. The goal is to have the combination of variables that has the lowest AIC or lowest residual sum of squares (RSS). If we focus on those columns, we can see that "indus" and "age" have the smallest AIC and RSS. Thus, we should consider deleting those two variables.
+
+## Lasso Regression
+
+Lasso is also known as least absolute shrinkage and selection operator. It is a regression analysis technique that does both variable selection and regularization in order to improve the accuracy of the resulting statistical model's predictions and its readability.
+
+```{r}
+fit.lar = lars(as.matrix(x),as.matrix(y),type="lasso") 
+summary(fit.lar) 
+fit.lar 
+```
+
+From the data generated by Lasso, we find that the smallest Cp value of $10.335$ exists at the $10th$ step. Then, it is suggesting us to delete the variables in the $11th$ and $12th$ step, which correspond to “indus” and “age”.
+
+## New model after deleting “indus” and “age”
+
+Since the results from both Stepwise regression and Lasso regression suggest to delete “indus” and “age,” we should generate a new model by removing those two variables and check if there is any improvement. 
+
+```{r}
+data.2 = data.1[,-c(3,6)] 
+fit.2 = lm(medv~.-1,data=data.2) 
+summary(fit.2) 
+
+par(mfrow=c(2,2)) 
+plot(fit.2) 
+```
+
+If we focus on the result, deletion of two variables lead to significant increase in F-statistics. However, R-Squared and Adjusted R-squared show little improvement. Next, as shown in the graph, Normal Q-Q plot indicates residuals of the model are nearly normal but still slightly off. Later, we need to further deal with outliers and influential points. 
+
+# Outliers and influential points
+```{r}
+abnormal=data.frame(rstudent(fit.2),cooks.distance(fit.2)) 
+head(abnormal[order(-abs(abnormal$rstudent.fit.2.)),]) 
+head(abnormal[order(-abnormal$cooks.distance.fit.2.),]) 
+delete_1 = c(369,373,372,370,371,413) # delete if cook distance is larger than 1 or standard residual is larger than 3
+data.3.1=data.2[-delete_1,] 
+#repeat the process
+fit.3.1 = lm(medv~.-1,data=data.3.1)  
+summary(fit.3.1) 
+abnormal=data.frame(rstudent(fit.3.1),cooks.distance(fit.3.1)) 
+head(abnormal[order(-abs(abnormal$rstudent.fit.3.1)),])
+head(abnormal[order(-abnormal$cooks.distance.fit.3.1),]) 
+
+delete_2 = c(366,368,162,365,375,187)
+data.3.2=data.3.1[-delete_2,]
+fit.3.2 = lm(medv~.-1,data=data.3.2)  
+summary(fit.3.2) 
+abnormal=data.frame(rstudent(fit.3.2),cooks.distance(fit.3.2)) 
+head(abnormal[order(-abs(abnormal$rstudent.fit.3.2)),])
+head(abnormal[order(-abnormal$cooks.distance.fit.3.2),]) 
+
+delete_3= c(375,167,163,415,408,402)
+data.3.3=data.3.2[-delete_3,]
+fit.3.3 = lm(medv~.-1,data=data.3.3)  
+summary(fit.3.3) 
+abnormal=data.frame(rstudent(fit.3.3),cooks.distance(fit.3.3)) 
+head(abnormal[order(-abs(abnormal$rstudent.fit.3.3)),])
+head(abnormal[order(-abnormal$cooks.distance.fit.3.3),]) 
+
+```
+
+Compare fit.$3.3$ and fit.$2$, F-statistic and R-square increase significantly, so the model improves. But outliers still exist, so OLS doesn't fit the data set.
+
+# Heteroscedasticity
+
+After building a linear regression model, it is common to check for heteroscedasticity in the residuals, which means that the variance of the residuals is unequal for certain values within a range. If heteroscedasticity exists, the analysis results may be invalid due to the use of a population with unequal variance.
+There are two methods for testing heteroscedasticity, one is the residual plot analysis method and the other is the rank correlation coefficient test method. In this project, we use the rank correlation coefficient test method to calculate the Spearman rank correlation coefficient in regression analysis to test whether the heteroscedasticity hypothesis is correct. The Spearman correlation coefficient is more robust to extreme values in the data and can reflect the nonlinear relationship between variables, so it is more suitable for measuring the complex relationship between the absolute values of the independent variable and the residual.
+
+```{r}
+e = resid(fit.3.3)
+abse = abs(e) 
+spearman_result = list() 
+cor.spearman = vector() 
+for(i in 1:10){
+  spearman_result[[i]] = cor.test(data.3.3[,i], abse, exact = FALSE, method = "spearman")
+  cor.spearman[i] = cor.test(data.3.3[,i], abse, exact = FALSE, method = "spearman")$p.value  
+} 
+spearman_result 
+cor.spearman 
+names(data.3.3[,-(11)])[cor.spearman<0.05]
+```
+
+In this model, we first calculate the residuals of the new regression, then store the test results by taking the absolute value of the residuals and creating a list to store the p-value for each test in a new vector, The output is the p-value for each independent variable tested by spearman test. After the comparison, there are three variables with p-value less than $0.05$ which is the average number of rooms per dwelling (rm), weighted distances to five Boston employment centers (dis), and the index of accessibility to radial highways (rad).
+
+# Autocorrelation
+
+The graph shows the change in the correlation coefficient of time series data as the lag number changes. When the lag number is $0$, the correlation coefficient is $1$, indicating that the two variables are completely positively correlated; as the lag number increases, the correlation coefficient gradually decreases and becomes stable, indicating that the correlation between the two variables gradually decreases and finally becomes uncorrelated.
+
+```{r}
+dev.new(width=4.75,height=3,pointsize=10) 
+acf(residuals(fit.3.3)) 
+```
+
+# Box-Cox: deal with autocorrelation and heteroscedasticity
+
+Regression diagnosis determines the validity of the model hypothesis through residual analysis and identifies high-impact data points through residual analysis and influence analysis. We use the Spearman rank correlation coefficient test. After finding problems, the main tool for resolving them is the Box-Cox transformation.
+Residual vs fitted: the residuals are well scattered above and below zero, with vertical spread (indicating variance) which does not depend much on the fitted value.
+Normal Q-Q: The figure shows that the errors basically obey the normal distribution.
+Scale-location : describe homoscedasticity. Constant variance is satisfied, and the points next to the horizontal line are randomly distributed.
+Residuals vs Leverage: it involves the calculation of standardized residuals, leverage values, and Cook's distance, which can identify outliers and high leverage points (leverage points) and thus identify strong influence points. If there are leverage points, it is necessary to determine which are the bad leverage points, specifically in the plot, this means points with Cook's distance greater than $0.5-1$, that is, these points need to be evaluated for their impact on the fitting model (further evaluation of the impact is not involved).
+
+```{r}
+x=rep(2,488) 
+medv = data.3.3[c("medv")] +x
+data.4 = cbind(data.3.3[,c(1:10)],medv) 
+bc = boxcox(medv~., data=data.4, lambda=seq(-2, 2, 0.01))
+lambda = bc$x[which.max(bc$y)]
+lambda 
+medv_bc = (data.4$medv ^ lambda - 1) / lambda 
+fit.4 = lm(medv_bc~.-medv,data=data.4) 
+summary(fit.4)
+
+par(mfrow = c(2,2)) 
+plot(fit.4)
+```
+
+Compared with fit.$3.3$, R-square and F-statistic increase, the model is improved, so we choose fit.$4$ as the result.
+
+# Conlusion
+As can be seen from the historical fluctuations of Boston housing prices, Boston housing prices continuously and rapidly rose in the third quarter of $1983-1988$, with a magnitude and speed far higher than the average of the US, and then showed a downward trend in $1989-1993$, with a large downward amplitude and a long-lasting stagnant market. In addition to being related to the prosperity of the local economy and consumer expectations, the significant increase in population and housing demand caused by a large influx of immigrants is particularly noticeable. Therefore, from a historical perspective, how to regulate the stability of Boston housing prices has a extremely important impact on the local political, economic, and social development.
+
+According to data from the U.S. Bureau of Census Statistics, during the period from 1980 to $1990$, Boston had a total of $187,000$ new immigrants, accounting for $4.7$% of its population in $1980$, showing the significant impact of immigration on its population. Due to the prosperity of the local real estate industry, a large influx of funds into the industry led to a significant increase in housing supply. However, due to the lag of the real estate industry, housing prices also fell several years later and it was difficult to reverse them in a short time. Excessive prosperity or decline of the real estate industry is not conducive to the economic development and social stability of the city, therefore the Boston government should control the fluctuation range of housing prices to prevent excessive fluctuations.
+
+Combining the signs of the regression coefficients of each explanatory variable in the regression results with the median of own homes, the government's housing price regulation policies can be divided into the following two situations. When the real estate market is overheated, first, the housing price can be suppressed in a short time by adjusting the property tax rate (tax coefficient is negative), although this method is flexible and efficient, but due to the lack of policy consistency over time, it may cause panic among investors in the real estate industry and is not conducive to the long-term development of the industry; Second, administrative means can be used to limit environmental indicators such as nitrogen oxide content (Nox coefficient is negative, through traffic restriction, reducing nitrogen oxide emission from vehicle use); Third, by promoting low-rent and affordable housing (rm coefficient is negative), increasing the supply of single-room housing, and ensuring the housing needs of the floating population to stabilize housing prices.
+
+When housing prices go down (which is very likely due to social stability and financial economic issues), the first step the Boston government can take is to increase police force and security spending (as crim is negatively correlated), which can help stabilize society by reducing crime rates and maintain housing stability. Second, the government can also improve infrastructure, increase the number of regional schools, attract more high-level teachers (as ptratio is negatively correlated), further plan for urban road reconstruction (as rad is positively correlated), and enhance the accessibility and convenience of city transportation, thus improving public services. Third, the government can also build a social welfare system and improve the basic system of protection for the floating population, and increase the income of the low-income group (as lstat is negatively correlated), thereby expanding the proportion of the middle-income group. Fourth, the government can also promote population mobility, attract high-quality labor force into urban areas (as b is positively correlated), enhance the development of the tertiary industry service, increase residents' consumption and income levels, and promote the stable development of the real estate industry.
